@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nano API Proxy — Mode A Demo</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!--
+      Test-only demo app for Nano API Proxy's Mode A (in-browser fetch interception). It has no
+      build step and no server-side logic: every "LLM API call" below is a plain fetch() to a
+      real vendor hostname (api.openai.com / api.anthropic.com / generativelanguage.googleapis.com)
+      that the extension intercepts client-side, so nothing here ever reaches the internet when
+      the extension is enabled. See README.md in this folder for how to run it.
+
+      This page must be served over http://localhost or http://127.0.0.1 (e.g.
+      `python3 -m http.server` from this directory) — the extension's default intercept targets
+      don't match file:// URLs.
+    -->
+    <header>
+      <h1>Nano API Proxy — Mode A Demo</h1>
+      <p class="hint">
+        拡張機能側で Intercept が ON になっていれば、ここでの fetch は実際のネットワークに出ず
+        Gemini Nano の応答が返ります。OFF のまま、または拡張機能が入っていない場合は
+        実在しないホストへの通信としてエラーになります（それが正常な切り分けです）。
+      </p>
+    </header>
+
+    <main>
+      <section class="controls">
+        <label>
+          Vendor
+          <select id="vendor">
+            <option value="openai">OpenAI (/v1/chat/completions)</option>
+            <option value="anthropic">Anthropic (/v1/messages)</option>
+            <option value="gemini">Gemini (:streamGenerateContent)</option>
+          </select>
+        </label>
+        <label>
+          Model
+          <input id="model" type="text" value="gpt-4o" />
+        </label>
+        <label class="checkbox">
+          <input id="stream" type="checkbox" checked />
+          Streaming
+        </label>
+        <label class="grow">
+          System prompt (任意)
+          <input id="system-prompt" type="text" placeholder="空欄可" />
+        </label>
+      </section>
+
+      <section id="chat-log" aria-live="polite"></section>
+
+      <section class="composer">
+        <textarea id="user-input" rows="2" placeholder="メッセージを入力して Enter（Shift+Enterで改行）">Hello!</textarea>
+        <button id="send-btn" type="button">Send</button>
+      </section>
+
+      <section class="status-bar">
+        <span id="status-text">Ready</span>
+        <button id="clear-btn" type="button">会話をクリア</button>
+      </section>
+
+      <details class="raw-panel">
+        <summary>直近のリクエスト/レスポンス (raw)</summary>
+        <div class="raw-grid">
+          <div>
+            <h3>Request</h3>
+            <pre id="raw-request"></pre>
+          </div>
+          <div>
+            <h3>Response (raw stream/body)</h3>
+            <pre id="raw-response"></pre>
+          </div>
+        </div>
+      </details>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
