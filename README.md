@@ -4,8 +4,7 @@ Local HTTP &amp; In-Browser Proxy for Chrome Built-in AI
 
 Chrome に内蔵された Gemini Nano（Prompt API）を使って、OpenAI などの LLM API を手元で再現する Chrome 拡張機能です。API キーの取得や課金をせずに、LLM を使うアプリの開発や結合テストを進められます。
 
-> **ステータス：Phase 1〜4 実装済み（実機での動作検証は未実施）**
-> コードは一通り揃っていますが、Chrome にロードしての実機検証はまだ行っていません。詳細な未検証事項は[開発仕様書](docs/Chrome%20Built-in%20AI%20(Gemini%20Nano)%20通信インターセプト%20＆%20ローカルAPIプロキシ拡張機能%20開発仕様書(Nano-API-Proxy).md)の §8 を参照してください。
+**現在のバージョン：v0.5.0**（実機での動作検証済み。詳細は[検証状況](#検証状況)を参照）
 
 ## 特徴
 
@@ -15,44 +14,14 @@ Chrome に内蔵された Gemini Nano（Prompt API）を使って、OpenAI な�
 - **サイドパネルでの監視**：両モードのリクエスト、プロンプト、TTFT（最初のトークンまでの時間）、応答をリアルタイムで一覧表示します。
 - **テスト用の設定**：System Prompt の上書きや、遅延・ゆらぎの再現ができます。
 
-## 使い方
+## クイックスタート
 
-### 拡張機能を読み込む
+1. [Releases](../../releases) から最新の zip をダウンロードして展開する（または `git clone` する）。
+2. `chrome://extensions` → デベロッパーモードを有効化 → 「パッケージ化されていない拡張機能を読み込む」で展開したフォルダを選択する。
+3. サイドパネルを開き、Built-in AI が `AVAILABLE` になっていることを確認する（`DOWNLOADABLE` ならモデルをダウンロード）。
+4. `demo/` フォルダのデモアプリでモードAの動作を確認する（詳細は [demo/README.md](demo/README.md)）。
 
-1. Chrome で `chrome://extensions` を開き、「デベロッパーモード」を有効にする。
-2. 「パッケージ化されていない拡張機能を読み込む」からこのリポジトリのルートディレクトリを選択する。
-3. サイドパネルを開く（拡張機能アイコンをクリック）と、Built-in AI の状態（`AVAILABLE` / `DOWNLOADABLE` など）が表示される。`DOWNLOADABLE` の場合は「モデルをダウンロード」を押す。
-
-### モードA：ブラウザ内での横取り
-
-既定では `http://localhost/*` と `http://127.0.0.1/*` が対象です。対象ページで以下のように `fetch` すると、実際のネットワークに出ることなく Gemini Nano の応答が返ります。
-
-```js
-const res = await fetch("https://api.openai.com/v1/chat/completions", {
-  method: "POST",
-  headers: { "Content-Type": "application/json", Authorization: "Bearer dummy" },
-  body: JSON.stringify({ model: "gpt-4o", stream: true, messages: [{ role: "user", content: "Hello" }] }),
-});
-```
-
-### モードB：ローカル HTTP サーバー
-
-初回のみ、Native Messaging Host のビルドと登録が必要です。
-
-```bash
-(cd host && go build -o bin/nano-proxy-host .)
-./install.sh <chrome-extensionのID>   # chrome://extensions に表示されるIDを指定（Windowsは install.ps1）
-```
-
-登録後、サイドパネルの「Start」を押すとローカルサーバーが起動します。
-
-```bash
-curl http://127.0.0.1:8080/v1/chat/completions \
-  -H "Content-Type: application/json" -H "Authorization: Bearer dummy" \
-  -d '{"model":"gemini-nano","messages":[{"role":"user","content":"Hello"}]}'
-```
-
-OpenAI SDK を使う場合は、`base_url` を `http://127.0.0.1:8080/v1` に向け、API キーには任意の文字列を指定します。
+詳しい手順・モードBのセットアップ・トラブルシューティングは **[利用マニュアル](docs/manual.md)** を参照してください。
 
 ## 動作要件
 
@@ -61,7 +30,7 @@ OpenAI SDK を使う場合は、`base_url` を `http://127.0.0.1:8080/v1` に向
   - OS：Windows 10 以降、macOS 13 以降、Linux、ChromeOS（Chromebook Plus）
   - ストレージ：空き容量 22GB 以上
   - 性能：VRAM 4GB 超の GPU、または RAM 16GB・4 コア以上の CPU
-- モードBを使う場合：Go 1.22 以降（Native Messaging Host のビルド用）
+- モードBを使う場合：Native Messaging Host の実行バイナリ（Releaseに同梱）、または Go 1.22 以降（自前でビルドする場合）
 
 ## 制約
 
@@ -69,6 +38,20 @@ OpenAI SDK を使う場合は、`base_url` を `http://127.0.0.1:8080/v1` に向
 - tools（function calling）、`n > 1`、画像入力には対応しません。
 - 横取りできるのは `fetch` だけです。`XMLHttpRequest`（ブラウザ版の axios など）や、Worker の中から発行されたリクエストは対象外です。
 - 横取りの対象は、既定では `localhost` / `127.0.0.1` のページだけです。
+- 初回の推論リクエストは Gemini Nano モデルのウォームアップのため数十秒かかることがあります（2回目以降は速くなります）。
+
+## 検証状況
+
+実機（macOS / Chrome 138+、GPU バックエンドの `nano_v3_gpu_low_tier_model`）で以下を確認済みです。
+
+| 項目 | 状態 |
+|---|---|
+| モードA（ブラウザ内 `fetch` 横取り、OpenAI形式） | ✅ 確認済み |
+| モードB（ローカルHTTPサーバー、ストリーミング/非ストリーミング） | ✅ 確認済み |
+| サイドパネルの Activity Log（TTFT・ステータス表示） | ✅ 確認済み |
+| Gemini Nano の GPU バックエンドでの推論 | ✅ 確認済み |
+| Anthropic / Gemini アダプター | 実装済み・簡易テスト済み（実機での網羅的な検証は未実施） |
+| 長時間ストリーミング時の Service Worker 生存性（[開発仕様書](<docs/Chrome Built-in AI (Gemini Nano) 通信インターセプト ＆ ローカルAPIプロキシ拡張機能 開発仕様書(Nano-API-Proxy).md>) §8） | 未検証 |
 
 ## 実装フェーズ
 
@@ -79,7 +62,9 @@ OpenAI SDK を使う場合は、`base_url` を `http://127.0.0.1:8080/v1` に向
 
 ## ドキュメント
 
-- [開発仕様書](docs/Chrome%20Built-in%20AI%20(Gemini%20Nano)%20通信インターセプト%20＆%20ローカルAPIプロキシ拡張機能%20開発仕様書(Nano-API-Proxy).md)
+- [利用マニュアル](docs/manual.md)
+- [デモアプリの使い方](demo/README.md)
+- [開発仕様書](<docs/Chrome Built-in AI (Gemini Nano) 通信インターセプト ＆ ローカルAPIプロキシ拡張機能 開発仕様書(Nano-API-Proxy).md>)
 
 ## ライセンス
 

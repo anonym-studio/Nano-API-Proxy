@@ -5,7 +5,9 @@
 # Usage:
 #   1. Load this repo as an unpacked extension (chrome://extensions -> Developer mode -> Load
 #      unpacked) and copy the extension ID shown there.
-#   2. cd host; go build -o bin\nano-proxy-host.exe .
+#   2. Have a host binary ready — either build one (cd host; go build -o bin\nano-proxy-host.exe .)
+#      or use the prebuilt one from a Release zip (host\bin\nano-proxy-host-windows-amd64.exe);
+#      this script auto-selects that prebuilt binary if host\bin\nano-proxy-host.exe doesn't exist.
 #   3. .\install.ps1 -ExtensionId <chrome-extension-id>
 param(
     [Parameter(Mandatory = $true)]
@@ -15,12 +17,21 @@ param(
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$BinaryPath = Join-Path $ScriptDir "host\bin\nano-proxy-host.exe"
+$BinDir = Join-Path $ScriptDir "host\bin"
+$BinaryPath = Join-Path $BinDir "nano-proxy-host.exe"
 $HostName = "com.local.nano.proxy"
 $TemplatePath = Join-Path $ScriptDir "host-manifest.template.json"
 
 if (-not (Test-Path $BinaryPath)) {
-    Write-Error "error: $BinaryPath not found. Build it first: cd host; go build -o bin\nano-proxy-host.exe ."
+    $Prebuilt = Join-Path $BinDir "nano-proxy-host-windows-amd64.exe"
+    if (Test-Path $Prebuilt) {
+        Copy-Item $Prebuilt $BinaryPath
+        Write-Host "Using prebuilt binary: $Prebuilt"
+    }
+}
+
+if (-not (Test-Path $BinaryPath)) {
+    Write-Error "error: $BinaryPath not found, and no prebuilt binary was found in $BinDir. Build it yourself: cd host; go build -o bin\nano-proxy-host.exe ."
 }
 
 $ManifestDir = Join-Path $env:LOCALAPPDATA "Nano-API-Proxy"

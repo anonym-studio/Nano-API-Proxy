@@ -145,3 +145,6 @@ vite.config.ts.timestamp-*
 # Nano API Proxy: built native messaging host binary (built locally per-OS by `go build`)
 host/bin/
 
+# Nano API Proxy: release packaging output (see scripts/build-release.sh)
+dist/
+
