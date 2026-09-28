@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>Nano API Proxy</title>
+    <link rel="stylesheet" href="sidepanel.css" />
+  </head>
+  <body>
+    <header class="status-bar">
+      <div class="status-row">
+        <span class="label">Built-in AI:</span>
+        <span id="ai-status" class="badge badge-unknown">CHECKING…</span>
+        <button id="download-btn" class="hidden" type="button">モデルをダウンロード</button>
+      </div>
+      <div id="download-progress-row" class="status-row hidden">
+        <progress id="download-progress" max="100" value="0"></progress>
+        <span id="download-progress-label">0%</span>
+      </div>
+      <div class="status-row">
+        <label class="toggle">
+          <input type="checkbox" id="intercept-toggle" />
+          Intercept
+        </label>
+        <span id="intercept-targets" class="hint"></span>
+      </div>
+      <div class="status-row">
+        <span class="label">Local Server:</span>
+        <span id="server-status" class="badge badge-unknown">STOPPED</span>
+        <input type="number" id="server-port" min="1" max="65535" value="8080" />
+        <button id="server-start-btn" type="button">Start</button>
+        <button id="server-stop-btn" type="button" class="hidden">Stop</button>
+      </div>
+      <div id="server-error" class="error hidden"></div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="logs">Activity Logs</button>
+      <button class="tab-btn" data-tab="settings">Settings</button>
+    </nav>
+
+    <section id="tab-logs" class="tab-panel active">
+      <div class="toolbar">
+        <select id="log-filter">
+          <option value="all">All Sources</option>
+          <option value="in-browser">IN-BROWSER</option>
+          <option value="external">EXTERNAL-HTTP</option>
+        </select>
+        <button id="clear-logs-btn" type="button">Clear Logs</button>
+      </div>
+      <ul id="log-list"></ul>
+      <p id="log-empty" class="hint">まだリクエストがありません。</p>
+    </section>
+
+    <section id="tab-settings" class="tab-panel">
+      <fieldset>
+        <legend>System Prompt Override</legend>
+        <textarea id="system-prompt-override" rows="3" placeholder="空欄なら上書きしません"></textarea>
+      </fieldset>
+      <fieldset>
+        <legend>Latency &amp; Jitter Simulation</legend>
+        <label>TTFT 遅延 (ms) <input type="number" id="latency-ttft" min="0" value="0" /></label>
+        <label>トークン間隔 (ms) <input type="number" id="latency-jitter" min="0" value="0" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>Intercept 対象オリジン</legend>
+        <textarea id="intercept-targets-input" rows="2" placeholder="1行に1パターン (例: http://localhost/*)"></textarea>
+        <button id="save-targets-btn" type="button">保存</button>
+      </fieldset>
+    </section>
+
+    <template id="log-item-template">
+      <li class="log-item">
+        <button class="log-summary" type="button">
+          <span class="badge source-badge"></span>
+          <span class="method"></span>
+          <span class="url"></span>
+          <span class="status"></span>
+          <span class="ttft"></span>
+        </button>
+        <div class="log-detail hidden">
+          <div class="log-origin"></div>
+          <div class="log-messages"></div>
+          <div class="log-response"></div>
+        </div>
+      </li>
+    </template>
+
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

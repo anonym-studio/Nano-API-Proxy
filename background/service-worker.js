@@ -3,9 +3,11 @@
 // them through an adapter (lib/adapters/) and the Prompt API (background/inference-router.js).
 import { InferenceQueue, QueueFullError } from './inference-queue.js';
 import { checkAvailability, runChatCompletion } from './inference-router.js';
+import * as activityLog from './activity-log.js';
 import * as openaiAdapter from '../lib/adapters/openai-adapter.js';
 
 const PORT_NAME = 'nano-api-proxy:intercept';
+const SIDE_PANEL_PORT_NAME = 'nano-api-proxy:sidepanel';
 const DEFAULT_TARGETS = ['http://localhost/*', 'http://127.0.0.1/*'];
 const CONTENT_SCRIPT_ID_MAIN = 'nano-api-proxy-interceptor';
 const CONTENT_SCRIPT_ID_ISOLATED = 'nano-api-proxy-relay';
@@ -15,6 +17,10 @@ const MAX_QUEUE_LENGTH = 10;
 const adapters = [openaiAdapter];
 
 const queue = new InferenceQueue(MAX_QUEUE_LENGTH);
+
+activityLog.restoreFromSession();
+
+chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
 
 async function getTargets() {
   const stored = await chrome.storage.local.get('interceptTargets');
@@ -99,6 +105,10 @@ function safeParseJson(text) {
 }
 
 chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === SIDE_PANEL_PORT_NAME) {
+    activityLog.attachSidePanelPort(port);
+    return;
+  }
   if (port.name !== PORT_NAME) return;
 
   let aborted = false;
@@ -115,8 +125,42 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message) return false;
+  if (message.type === 'server:start') {
+    handleServerStart(message.port).then(sendResponse);
+    return true;
+  }
+  if (message.type === 'server:stop') {
+    handleServerStop().then(sendResponse);
+    return true;
+  }
+  if (message.type === 'log:clear') {
+    activityLog.clearLog();
+    sendResponse({ ok: true });
+    return false;
+  }
+  return false;
+});
+
+// Native Messaging Host lifecycle management lands in Phase 3 (spec §2.2 Mode B). Until then,
+// Start always reports the host as not-yet-implemented so the side panel UI has something real
+// to react to.
+async function handleServerStart(_port) {
+  await chrome.storage.local.set({
+    serverStatus: 'ERROR',
+    serverError: 'Native Messaging Host is not implemented yet (Phase 3).',
+  });
+  return { ok: false, error: 'not_implemented' };
+}
+
+async function handleServerStop() {
+  await chrome.storage.local.set({ serverStatus: 'STOPPED', serverError: null });
+  return { ok: true };
+}
+
 async function handleRequest(port, message, signal, isAborted) {
-  const { id, url, method, body } = message;
+  const { id, url, method, body, pageUrl } = message;
 
   const match = matchAdapter(url, method);
   if (!match) {
@@ -149,16 +193,30 @@ async function handleRequest(port, message, signal, isAborted) {
     return;
   }
 
+  // Settings tab: "System Prompt Override" replaces whatever system/developer messages the
+  // client sent, letting a fixed test prompt drive the model regardless of the app under test.
+  const { systemPromptOverride } = await chrome.storage.local.get('systemPromptOverride');
+  if (systemPromptOverride) {
+    normalized.messages = [
+      { role: 'system', content: systemPromptOverride },
+      ...normalized.messages.filter((m) => m.role !== 'system'),
+    ];
+  }
+
+  activityLog.createLogEntry({
+    id,
+    source: 'in-browser',
+    method,
+    url,
+    origin: pageUrl,
+    messagesPreview: normalized.messages,
+  });
+
   const availability = await checkAvailability();
   if (availability !== 'available') {
-    sendError(
-      port,
-      id,
-      503,
-      'model_unavailable',
-      `Gemini Nano is not available (status: ${availability}). Open the side panel to download the model.`,
-      adapter
-    );
+    const errMessage = `Gemini Nano is not available (status: ${availability}). Open the side panel to download the model.`;
+    activityLog.completeLogEntry(id, { status: '503 Service Unavailable', responseText: errMessage });
+    sendError(port, id, 503, 'model_unavailable', errMessage, adapter);
     return;
   }
 
@@ -167,7 +225,9 @@ async function handleRequest(port, message, signal, isAborted) {
     enqueued = queue.enqueue(() => runRequest(port, id, adapter, normalized, signal, isAborted));
   } catch (err) {
     if (err instanceof QueueFullError) {
-      sendError(port, id, 429, 'queue_full', 'Too many concurrent requests. Try again shortly.', adapter);
+      const errMessage = 'Too many concurrent requests. Try again shortly.';
+      activityLog.completeLogEntry(id, { status: '429 Too Many Requests', responseText: errMessage });
+      sendError(port, id, 429, 'queue_full', errMessage, adapter);
       return;
     }
     throw err;
@@ -177,7 +237,11 @@ async function handleRequest(port, message, signal, isAborted) {
     await enqueued;
   } catch (err) {
     if (!isAborted()) {
-      sendError(port, id, 500, 'internal_error', err.message || String(err), adapter);
+      const errMessage = err.message || String(err);
+      activityLog.completeLogEntry(id, { status: '500 Internal Error', responseText: errMessage });
+      sendError(port, id, 500, 'internal_error', errMessage, adapter);
+    } else {
+      activityLog.completeLogEntry(id, { status: 'Cancelled', responseText: '' });
     }
   }
 }
@@ -186,8 +250,19 @@ function estimateTokens(text) {
   return Math.ceil(text.length / 4);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function runRequest(port, id, adapter, normalized, signal, isAborted) {
   if (isAborted()) return;
+
+  const { latencyTtftMs, latencyJitterMs } = await chrome.storage.local.get([
+    'latencyTtftMs',
+    'latencyJitterMs',
+  ]);
+  const ttftDelayMs = Number(latencyTtftMs) || 0;
+  const jitterMs = Number(latencyJitterMs) || 0;
 
   const createdAt = Math.floor(Date.now() / 1000);
   const responseId = `chatcmpl-${id}`;
@@ -203,10 +278,20 @@ async function runRequest(port, id, adapter, normalized, signal, isAborted) {
 
   let fullText = '';
   let finishReason = 'stop';
+  let firstToken = true;
 
   try {
     for await (const delta of runChatCompletion(normalized, signal)) {
       if (isAborted()) return;
+      if (firstToken) {
+        firstToken = false;
+        if (ttftDelayMs > 0) await sleep(ttftDelayMs);
+        if (isAborted()) return;
+        activityLog.markFirstToken(id);
+      } else if (jitterMs > 0) {
+        await sleep(jitterMs);
+        if (isAborted()) return;
+      }
       fullText += delta;
       if (normalized.stream) {
         port.postMessage({
@@ -223,17 +308,27 @@ async function runRequest(port, id, adapter, normalized, signal, isAborted) {
       }
     }
   } catch (err) {
-    if (isAborted() || (err && err.name === 'AbortError')) return;
+    if (isAborted() || (err && err.name === 'AbortError')) {
+      activityLog.completeLogEntry(id, { status: 'Cancelled', responseText: fullText });
+      return;
+    }
+    const errMessage = err.message || String(err);
+    activityLog.completeLogEntry(id, { status: '500 Internal Error', responseText: errMessage });
     if (normalized.stream) {
-      port.postMessage({ type: 'chunk', id, data: adapter.buildSSEErrorChunk(err.message || String(err)) });
+      port.postMessage({ type: 'chunk', id, data: adapter.buildSSEErrorChunk(errMessage) });
       port.postMessage({ type: 'response_end', id });
     } else {
-      port.postMessage({ type: 'error', id, message: err.message || String(err) });
+      port.postMessage({ type: 'error', id, message: errMessage });
     }
     return;
   }
 
-  if (isAborted()) return;
+  if (isAborted()) {
+    activityLog.completeLogEntry(id, { status: 'Cancelled', responseText: fullText });
+    return;
+  }
+
+  activityLog.completeLogEntry(id, { status: '200 OK', responseText: fullText });
 
   if (normalized.stream) {
     port.postMessage({
