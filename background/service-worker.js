@@ -66,6 +66,21 @@ async function registerInterceptScripts() {
   ]);
 }
 
+// chrome.runtime.onInstalled, onStartup, and storage.onChanged can all fire registration in
+// quick succession (e.g. onInstalled's own storage.local.set() below triggers storage.onChanged
+// before onInstalled's direct call finishes). registerInterceptScripts() reads the current
+// registration state and then writes it, so two overlapping calls can both see "nothing
+// registered yet" and both try to register the same script id, which Chrome rejects with
+// "Duplicate script ID". Serialize all callers through one promise chain instead of calling
+// registerInterceptScripts() directly.
+let registrationChain = Promise.resolve();
+function scheduleRegisterInterceptScripts() {
+  registrationChain = registrationChain.then(registerInterceptScripts).catch((err) => {
+    console.error('nano-api-proxy: failed to register intercept scripts', err);
+  });
+  return registrationChain;
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.get(['interceptEnabled', 'interceptTargets']).then((stored) => {
     const updates = {};
@@ -73,16 +88,16 @@ chrome.runtime.onInstalled.addListener(() => {
     if (stored.interceptTargets === undefined) updates.interceptTargets = DEFAULT_TARGETS;
     if (Object.keys(updates).length > 0) chrome.storage.local.set(updates);
   });
-  registerInterceptScripts();
+  scheduleRegisterInterceptScripts();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  registerInterceptScripts();
+  scheduleRegisterInterceptScripts();
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.interceptTargets) {
-    registerInterceptScripts();
+    scheduleRegisterInterceptScripts();
   }
 });
 
