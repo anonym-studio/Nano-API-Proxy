@@ -1,0 +1,7 @@
+{
+  "name": "com.local.nano.proxy",
+  "description": "Nano API Proxy local HTTP bridge",
+  "path": "REPLACE_WITH_ABSOLUTE_PATH_TO_BINARY",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://REPLACE_WITH_EXTENSION_ID/"]
+}

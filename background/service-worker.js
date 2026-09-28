@@ -4,6 +4,7 @@
 import { InferenceQueue, QueueFullError } from './inference-queue.js';
 import { checkAvailability, runChatCompletion } from './inference-router.js';
 import * as activityLog from './activity-log.js';
+import { startServer, stopServer, setRequestHandler } from './native-server.js';
 import * as openaiAdapter from '../lib/adapters/openai-adapter.js';
 
 const PORT_NAME = 'nano-api-proxy:intercept';
@@ -19,6 +20,7 @@ const adapters = [openaiAdapter];
 const queue = new InferenceQueue(MAX_QUEUE_LENGTH);
 
 activityLog.restoreFromSession();
+setRequestHandler(handleRequest);
 
 chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true }).catch(() => {});
 
@@ -128,11 +130,11 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message) return false;
   if (message.type === 'server:start') {
-    handleServerStart(message.port).then(sendResponse);
+    startServer(message.port).then(sendResponse);
     return true;
   }
   if (message.type === 'server:stop') {
-    handleServerStop().then(sendResponse);
+    stopServer().then(sendResponse);
     return true;
   }
   if (message.type === 'log:clear') {
@@ -143,24 +145,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-// Native Messaging Host lifecycle management lands in Phase 3 (spec §2.2 Mode B). Until then,
-// Start always reports the host as not-yet-implemented so the side panel UI has something real
-// to react to.
-async function handleServerStart(_port) {
-  await chrome.storage.local.set({
-    serverStatus: 'ERROR',
-    serverError: 'Native Messaging Host is not implemented yet (Phase 3).',
-  });
-  return { ok: false, error: 'not_implemented' };
-}
-
-async function handleServerStop() {
-  await chrome.storage.local.set({ serverStatus: 'STOPPED', serverError: null });
-  return { ok: true };
-}
-
 async function handleRequest(port, message, signal, isAborted) {
-  const { id, url, method, body, pageUrl } = message;
+  const { id, url, method, body, pageUrl, source } = message;
 
   const match = matchAdapter(url, method);
   if (!match) {
@@ -205,7 +191,7 @@ async function handleRequest(port, message, signal, isAborted) {
 
   activityLog.createLogEntry({
     id,
-    source: 'in-browser',
+    source: source || 'in-browser',
     method,
     url,
     origin: pageUrl,

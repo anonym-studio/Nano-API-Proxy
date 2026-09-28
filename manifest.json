@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Emulate OpenAI-compatible LLM APIs using Chrome's built-in Gemini Nano, for local dev and testing.",
   "minimum_chrome_version": "138",
-  "permissions": ["storage", "scripting", "offscreen", "sidePanel"],
+  "permissions": ["storage", "scripting", "offscreen", "sidePanel", "nativeMessaging"],
   "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
   "optional_host_permissions": ["<all_urls>"],
   "background": {
