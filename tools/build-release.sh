@@ -48,16 +48,20 @@ if [ -n "$SPEC_SRC" ]; then
   python3 - "$STAGE_DIR" "$(basename "$SPEC_SRC")" <<'PY'
 import pathlib
 import sys
+import unicodedata
 
 stage = pathlib.Path(sys.argv[1])
-old_name = sys.argv[2]
+# macOS's filesystem (APFS/HFS+) returns filenames in NFD (decomposed) form, while the markdown
+# source files were written with normal NFC text, so a direct byte comparison would miss even
+# though both print identically. Normalize both sides to NFC before comparing.
+old_name = unicodedata.normalize("NFC", sys.argv[2])
 
 replacements = [
     (stage / "README.md", f"<docs/{old_name}>", "<docs/spec-ja.md>"),
     (stage / "docs" / "manual.md", f"<{old_name}>", "<spec-ja.md>"),
 ]
 for path, old, new in replacements:
-    text = path.read_text(encoding="utf-8")
+    text = unicodedata.normalize("NFC", path.read_text(encoding="utf-8"))
     if old not in text:
         print(f"warning: expected link text not found in {path}", file=sys.stderr)
         continue
