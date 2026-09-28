@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Nano API Proxy",
+  "version": "0.1.0",
+  "description": "Emulate OpenAI-compatible LLM APIs using Chrome's built-in Gemini Nano, for local dev and testing.",
+  "minimum_chrome_version": "138",
+  "permissions": ["storage", "scripting", "offscreen"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "optional_host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background/service-worker.js",
+    "type": "module"
+  }
+}
