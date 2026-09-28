@@ -16,7 +16,7 @@ Chrome に内蔵された Gemini Nano（Prompt API）を使って、OpenAI な�
 
 ## クイックスタート
 
-1. [Releases](../../releases) から最新の zip をダウンロードして展開する（または `git clone` する）。
+1. [Releases](https://github.com/anonym-studio/Nano-API-Proxy/releases) から最新の zip をダウンロードして展開する（または `git clone` する）。
 2. `chrome://extensions` → デベロッパーモードを有効化 → 「パッケージ化されていない拡張機能を読み込む」で展開したフォルダを選択する。
 3. サイドパネルを開き、Built-in AI が `AVAILABLE` になっていることを確認する（`DOWNLOADABLE` ならモデルをダウンロード）。
 4. `demo/` フォルダのデモアプリでモードAの動作を確認する（詳細は [demo/README.md](demo/README.md)）。
@@ -59,6 +59,38 @@ Chrome に内蔵された Gemini Nano（Prompt API）を使って、OpenAI な�
 2. **Phase 2**：サイドパネルの UI と通信ログ
 3. **Phase 3**：Native Messaging Host（Go）によるローカル HTTP サーバー
 4. **Phase 4**：Anthropic / Gemini API 互換アダプター、両モード共通のリクエストキュー
+
+## リリース手順（メンテナ向け）
+
+新しいバージョンを [Releases](https://github.com/anonym-studio/Nano-API-Proxy/releases) に公開する手順です。
+
+1. `manifest.json` の `version` と、この README 冒頭の「現在のバージョン」表記を更新する。
+2. `CHANGELOG.md` に新バージョンの変更点を追記する。
+3. ここまでの変更をコミットする（後続の `git archive` はコミット済みの内容のみを対象にするため、未コミットの変更は zip に含まれない）。
+4. リリース用 zip をビルドする。
+
+   ```bash
+   ./tools/build-release.sh          # manifest.json の version を使う
+   # または ./tools/build-release.sh 0.6.0 のようにバージョンを明示指定
+   ```
+
+   `dist/nano-api-proxy-<version>.zip` が生成される。macOS (amd64/arm64)・Linux (amd64/arm64)・Windows (amd64) 向けの Native Messaging Host バイナリを Go でクロスコンパイルして同梱するため、事前に Go が必要。
+
+5. コミットを push し、タグを作成して push する。
+
+   ```bash
+   git push origin main
+   git tag -a v0.6.0 -m "v0.6.0"
+   git push origin v0.6.0
+   ```
+
+6. GitHub Release を作成し、zip を添付する。
+
+   ```bash
+   gh release create v0.6.0 "dist/nano-api-proxy-0.6.0.zip" \
+     --title "v0.6.0" \
+     --notes "..."
+   ```
 
 ## ドキュメント
 
