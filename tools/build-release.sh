@@ -41,6 +41,30 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 git archive --format=tar HEAD | tar -x -C "$STAGE_DIR"
 
+echo "==> Renaming the Japanese-named spec doc to an ASCII filename (zip UTF-8 filename support is inconsistent across unzip tools, notably on Windows, and produces mojibake for non-ASCII names)"
+SPEC_SRC=$(find "$STAGE_DIR/docs" -maxdepth 1 -name '*.md' ! -name 'manual.md')
+if [ -n "$SPEC_SRC" ]; then
+  mv "$SPEC_SRC" "$STAGE_DIR/docs/spec-ja.md"
+  python3 - "$STAGE_DIR" "$(basename "$SPEC_SRC")" <<'PY'
+import pathlib
+import sys
+
+stage = pathlib.Path(sys.argv[1])
+old_name = sys.argv[2]
+
+replacements = [
+    (stage / "README.md", f"<docs/{old_name}>", "<docs/spec-ja.md>"),
+    (stage / "docs" / "manual.md", f"<{old_name}>", "<spec-ja.md>"),
+]
+for path, old, new in replacements:
+    text = path.read_text(encoding="utf-8")
+    if old not in text:
+        print(f"warning: expected link text not found in {path}", file=sys.stderr)
+        continue
+    path.write_text(text.replace(old, new), encoding="utf-8")
+PY
+fi
+
 echo "==> Cross-compiling native messaging host for common platforms"
 mkdir -p "$STAGE_DIR/host/bin"
 TARGETS=("darwin amd64" "darwin arm64" "linux amd64" "linux arm64" "windows amd64")
