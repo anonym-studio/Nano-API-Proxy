@@ -6,6 +6,8 @@ import { checkAvailability, runChatCompletion } from './inference-router.js';
 import * as activityLog from './activity-log.js';
 import { startServer, stopServer, setRequestHandler } from './native-server.js';
 import * as openaiAdapter from '../lib/adapters/openai-adapter.js';
+import * as anthropicAdapter from '../lib/adapters/anthropic-adapter.js';
+import * as geminiAdapter from '../lib/adapters/gemini-adapter.js';
 
 const PORT_NAME = 'nano-api-proxy:intercept';
 const SIDE_PANEL_PORT_NAME = 'nano-api-proxy:sidepanel';
@@ -14,8 +16,9 @@ const CONTENT_SCRIPT_ID_MAIN = 'nano-api-proxy-interceptor';
 const CONTENT_SCRIPT_ID_ISOLATED = 'nano-api-proxy-relay';
 const MAX_QUEUE_LENGTH = 10;
 
-// Order matters: the first adapter whose matchRequest() returns non-null wins.
-const adapters = [openaiAdapter];
+// Order matters: the first adapter whose matchRequest() returns non-null wins. Each vendor's
+// endpoint shape (path pattern) is disjoint from the others, so order has no real effect today.
+const adapters = [openaiAdapter, anthropicAdapter, geminiAdapter];
 
 const queue = new InferenceQueue(MAX_QUEUE_LENGTH);
 
@@ -84,15 +87,15 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 });
 
 function matchAdapter(url, method) {
-  let pathname;
+  let parsed;
   try {
-    pathname = new URL(url).pathname;
+    parsed = new URL(url);
   } catch (err) {
     return null;
   }
   for (const adapter of adapters) {
-    const kind = adapter.matchRequest(pathname, method);
-    if (kind) return { adapter, kind };
+    const kind = adapter.matchRequest(parsed.pathname, method);
+    if (kind) return { adapter, kind, pathname: parsed.pathname, query: parsed.search };
   }
   return null;
 }
@@ -153,7 +156,7 @@ async function handleRequest(port, message, signal, isAborted) {
     sendError(port, id, 400, 'unsupported_endpoint', `No adapter matches ${method} ${url}`, openaiAdapter);
     return;
   }
-  const { adapter, kind } = match;
+  const { adapter, kind, pathname, query } = match;
 
   if (kind === 'models') {
     sendJsonResponse(port, id, 200, adapter.buildModelsListResponse());
@@ -168,7 +171,7 @@ async function handleRequest(port, message, signal, isAborted) {
 
   let normalized;
   try {
-    normalized = adapter.parseChatCompletionsRequest(parsedBody);
+    normalized = adapter.parseRequest(parsedBody, { kind, pathname, query });
   } catch (err) {
     sendError(port, id, 400, 'invalid_request_error', err.message, adapter);
     return;
@@ -260,6 +263,10 @@ async function runRequest(port, id, adapter, normalized, signal, isAborted) {
       status: 200,
       headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache' },
     });
+    // Anthropic needs a message_start/content_block_start envelope before any delta; OpenAI and
+    // Gemini return '' here and send nothing (spec §3.2 adapter interface).
+    const prefix = adapter.buildStreamPrefix(normalized.model, responseId, createdAt);
+    if (prefix) port.postMessage({ type: 'chunk', id, data: prefix });
   }
 
   let fullText = '';
@@ -322,7 +329,8 @@ async function runRequest(port, id, adapter, normalized, signal, isAborted) {
       id,
       data: adapter.buildFinalSSEChunk(normalized.model, responseId, createdAt, finishReason),
     });
-    port.postMessage({ type: 'chunk', id, data: adapter.buildDoneSSE() });
+    const doneMarker = adapter.buildDoneSSE();
+    if (doneMarker) port.postMessage({ type: 'chunk', id, data: doneMarker });
     port.postMessage({ type: 'response_end', id });
   } else {
     const response = adapter.buildNonStreamResponse(fullText, normalized.model, responseId, createdAt, finishReason);
@@ -337,5 +345,5 @@ function sendJsonResponse(port, id, status, jsonBody) {
 }
 
 function sendError(port, id, status, code, message, adapter) {
-  sendJsonResponse(port, id, status, adapter.buildErrorResponse(code, message));
+  sendJsonResponse(port, id, status, adapter.buildErrorResponse(code, message, status));
 }
